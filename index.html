@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#f7f8fc">
+<title>三目並べ</title>
+<style>
+  :root { color-scheme: light; --ink:#182230; --muted:#667085; --line:#cbd5e1; --accent:#2563eb; --cell:#fff; }
+  * { box-sizing:border-box; }
+  body { margin:0; padding:20px 14px max(24px, env(safe-area-inset-bottom)); font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; color:var(--ink); background:#f7f8fc; }
+  main { width:min(100%,430px); margin:0 auto; }
+  h1 { text-align:center; font-size:28px; margin:8px 0 6px; }
+  .sub { text-align:center; color:var(--muted); margin:0 0 18px; font-size:14px; }
+  .status { min-height:54px; display:flex; align-items:center; justify-content:center; text-align:center; padding:10px; margin:0 0 14px; border-radius:14px; background:#eaf1ff; font-weight:700; font-size:17px; }
+  .board { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; width:100%; aspect-ratio:1; }
+  .cell { display:flex; align-items:center; justify-content:center; min-width:0; border:2px solid var(--line); border-radius:16px; background:var(--cell); font-size:clamp(54px,18vw,88px); font-weight:800; line-height:1; color:var(--accent); padding:0; touch-action:manipulation; -webkit-tap-highlight-color:transparent; }
+  .cell:disabled { opacity:1; }
+  .cell.x { color:#d9485f; }
+  .cell.winner { background:#dff8e8; border-color:#16a34a; }
+  .controls { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-top:16px; }
+  button.action, select { min-height:48px; border:1px solid #cbd5e1; border-radius:12px; padding:10px 12px; background:white; color:var(--ink); font-size:16px; font-weight:600; }
+  button.primary { background:var(--accent); color:white; border-color:var(--accent); }
+  .score { display:flex; justify-content:space-around; gap:8px; margin-top:16px; padding:13px 8px; border:1px solid #e2e8f0; background:white; border-radius:14px; text-align:center; }
+  .score strong { display:block; font-size:22px; margin-top:3px; }
+  .small { color:var(--muted); font-size:12px; text-align:center; margin-top:15px; line-height:1.5; }
+  .settings { display:flex; align-items:center; justify-content:center; gap:10px; margin-top:14px; }
+  select { max-width:180px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>⭕ 三目並べ ❌</h1>
+  <p class="sub">マスをタップして遊びます</p>
+  <div id="status" class="status" role="status" aria-live="polite">あなた（○）の番です</div>
+  <div id="board" class="board" aria-label="三目並べの盤面"></div>
+  <div class="controls">
+    <button id="restart" class="action primary" type="button">もう一度遊ぶ</button>
+    <button id="undo" class="action" type="button">一手戻す</button>
+  </div>
+  <div class="settings">
+    <label for="starter">先攻：</label>
+    <select id="starter">
+      <option value="human">あなた（○）</option>
+      <option value="computer">コンピューター（×）</option>
+    </select>
+  </div>
+  <div class="score">
+    <div>あなた（○）<strong id="humanScore">0</strong></div>
+    <div>引き分け<strong id="drawScore">0</strong></div>
+    <div>コンピューター（×）<strong id="computerScore">0</strong></div>
+  </div>
+  <p class="small">コンピューターは最善手を選びます。引き分けにはできますが、勝つのは難しい相手です。</p>
+</main>
+<script>
+(() => {
+  "use strict";
+  const boardEl = document.getElementById("board");
+  const statusEl = document.getElementById("status");
+  const starterEl = document.getElementById("starter");
+  const humanScoreEl = document.getElementById("humanScore");
+  const drawScoreEl = document.getElementById("drawScore");
+  const computerScoreEl = document.getElementById("computerScore");
+  const wins = [[0,1,2],[3,4,5],[6,7,8],[0,3,6],[1,4,7],[2,5,8],[0,4,8],[2,4,6]];
+  let cells = Array(9).fill("");
+  let history = [];
+  let current = "human";
+  let over = false;
+  let winningLine = [];
+  let scores = { human:0, draw:0, computer:0 };
+
+  function result(b) {
+    for (const line of wins) {
+      if (b[line[0]] && b[line[0]] === b[line[1]] && b[line[1]] === b[line[2]]) {
+        return { winner:b[line[0]], line };
+      }
+    }
+    return b.every(Boolean) ? { winner:"draw", line:[] } : null;
+  }
+
+  function minimax(b, isComputer) {
+    const r = result(b);
+    if (r) {
+      if (r.winner === "computer") return { score:10 };
+      if (r.winner === "human") return { score:-10 };
+      return { score:0 };
+    }
+    let best = { score: isComputer ? -Infinity : Infinity, index:-1 };
+    for (let i=0;i<9;i++) {
+      if (b[i]) continue;
+      b[i] = isComputer ? "computer" : "human";
+      const score = minimax(b, !isComputer).score;
+      b[i] = "";
+      if (isComputer ? score > best.score : score < best.score) best = { score, index:i };
+    }
+    return best;
+  }
+
+  function render() {
+    boardEl.replaceChildren();
+    cells.forEach((v,i) => {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "cell" + (v === "computer" ? " x" : "") + (winningLine.includes(i) ? " winner" : "");
+      btn.textContent = v === "human" ? "○" : v === "computer" ? "×" : "";
+      btn.setAttribute("aria-label", `${i+1}番のマス${v ? "、" + (v==="human"?"○":"×") : "、空き"}`);
+      btn.disabled = !!v || over || current !== "human";
+      btn.addEventListener("click", () => playHuman(i));
+      boardEl.appendChild(btn);
+    });
+    humanScoreEl.textContent = scores.human;
+    drawScoreEl.textContent = scores.draw;
+    computerScoreEl.textContent = scores.computer;
+  }
+
+  function updateResult() {
+    const r = result(cells);
+    if (!r) return false;
+    over = true;
+    winningLine = r.line;
+    if (r.winner === "human") {
+      statusEl.textContent = "あなたの勝ちです！ おめでとうございます 🎉";
+      scores.human++;
+    } else if (r.winner === "computer") {
+      statusEl.textContent = "コンピューターの勝ちです。もう一局いきましょう！";
+      scores.computer++;
+    } else {
+      statusEl.textContent = "引き分けです！";
+      scores.draw++;
+    }
+    render();
+    return true;
+  }
+
+  function playHuman(i) {
+    if (over || current !== "human" || cells[i]) return;
+    history.push({ cells:cells.slice(), current, over, winningLine:winningLine.slice() });
+    cells[i] = "human";
+    if (updateResult()) return;
+    current = "computer";
+    statusEl.textContent = "コンピューターが考えています…";
+    render();
+    window.setTimeout(() => {
+      if (over) return;
+      const move = minimax(cells.slice(), true).index;
+      if (move >= 0) cells[move] = "computer";
+      if (!updateResult()) {
+        current = "human";
+        statusEl.textContent = "あなた（○）の番です";
+        render();
+      }
+    }, 250);
+  }
+
+  function resetGame() {
+    cells = Array(9).fill("");
+    history = [];
+    over = false;
+    winningLine = [];
+    current = starterEl.value;
+    statusEl.textContent = current === "human" ? "あなた（○）の番です" : "コンピューター（×）の番です";
+    render();
+    if (current === "computer") {
+      window.setTimeout(() => {
+        const move = minimax(cells.slice(), true).index;
+        if (move >= 0) cells[move] = "computer";
+        current = "human";
+        statusEl.textContent = "あなた（○）の番です";
+        render();
+      }, 250);
+    }
+  }
+
+  document.getElementById("restart").addEventListener("click", resetGame);
+  document.getElementById("undo").addEventListener("click", () => {
+    if (!history.length) return;
+    const prev = history.pop();
+    cells = prev.cells;
+    current = prev.current;
+    over = prev.over;
+    winningLine = prev.winningLine;
+    statusEl.textContent = "一手戻しました。あなた（○）の番です";
+    render();
+  });
+  starterEl.addEventListener("change", resetGame);
+  resetGame();
+})();
+</script>
+</body>
+</html>
